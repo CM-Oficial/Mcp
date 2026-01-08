@@ -5,7 +5,7 @@ O MCP resolve o abandono do repositório oficial, permitindo que a comunidade su
 
 ### 🛠 Como Instalar:
 ```bash
-curl -sL [https://raw.githubusercontent.com/CM-oficial/MakeCPkg/main/install.sh](https://raw.githubusercontent.com/SEU_USUARIO/MakeCPkg/main/install.sh) | bash
+curl -sL [https://raw.githubusercontent.com/CM-oficial/MakeCPkg/main/install.sh](https://raw.githubusercontent.com/CM-oficial/MakeCPkg/main/install.sh) | bash
 
 Funcionalidades:
 MID (Magic ID): Identificação única por projeto.
