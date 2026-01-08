@@ -8,7 +8,7 @@ except ImportError:
     import requests
 
 # --- CONFIGURAÇÕES ---
-REPO_URL = "https://mcpor.surge.sh"
+REPO_URL = "https://mcpor-oficial.surge.sh"
 HEADERS = {'User-Agent': 'MCP-Console-Client/1.6'}
 
 def gerar_mid(nome):
@@ -21,7 +21,7 @@ def setup():
     os.makedirs(pasta, exist_ok=True)
     with open(os.path.join(pasta, "mcp_manifest.json"), "w") as f:
         json.dump({"mid": mid, "name": nome, "author": "CM-oficial", "date": time.strftime("%Y-%m-%d")}, f, indent=4)
-    print(f"\n[OK] Pasta {pasta} criada. Coloque seus arquivos .py nela!")
+    print(f"\n[OK] Pasta {pasta} criada! ID: {mid}")
 
 def pack():
     pastas = [d for d in os.listdir('.') if os.path.isdir(d) and d.startswith("RI_BIN_N_")]
@@ -37,46 +37,46 @@ def pack():
                         caminho_f = os.path.join(raiz, arq)
                         z.write(caminho_f, os.path.relpath(caminho_f, '.'))
             print(f"[OK] Pacote gerado: {arquivo_mcp}")
-        except Exception as e: print(f"[!] Erro no pack {p}: {e}")
+        except Exception as e: print(f"[!] Erro no pack: {e}")
 
 def mpush():
     arqs = [f for f in os.listdir('.') if f.endswith('.mcp')]
     if not arqs: return print("\n[!] Erro: Use 'pack' primeiro.")
     
-    # 1. Busca repo atual
     repo_data = {"packages": {}}
     try:
         r = requests.get(f"{REPO_URL}/repo.json", headers=HEADERS, timeout=10)
         if r.status_code == 200: repo_data = r.json()
     except: print("[!] Criando novo catalogo no servidor...")
 
-    # 2. Prepara upload
     os.makedirs("upload_temp/RI_bin", exist_ok=True)
     for arquivo_nome in arqs:
         nome_ferramenta = arquivo_nome.replace(".mcp", "")
-        # Acha a pasta local para pegar o MID
-        mid_local = next((d for d in os.listdir('.') if os.path.isdir(d) and nome_ferramenta in d), None)
-        if mid_local:
-            caminho_dst = os.path.join("upload_temp/RI_bin", mid_local)
-            os.makedirs(caminho_dst, exist_ok=True)
-            os.system(f"cp {arquivo_nome} {caminho_dst}/")
-            repo_data["packages"][nome_ferramenta] = {"folder": mid_local, "date": time.strftime("%Y-%m-%d")}
+        # Busca a pasta física para obter o ID correto
+        for d in os.listdir('.'):
+            if os.path.isdir(d) and d.startswith("RI_BIN_N_"):
+                with open(os.path.join(d, "mcp_manifest.json"), "r") as f:
+                    if json.load(f)['name'] == nome_ferramenta:
+                        caminho_dst = os.path.join("upload_temp/RI_bin", d)
+                        os.makedirs(caminho_dst, exist_ok=True)
+                        os.system(f"cp {arquivo_nome} {caminho_dst}/")
+                        repo_data["packages"][nome_ferramenta] = {"folder": d, "date": time.strftime("%Y-%m-%d")}
 
     with open("upload_temp/repo.json", "w") as f:
         json.dump(repo_data, f, indent=4)
 
     print("[+] Subindo para o Surge...")
-    os.system(f"surge upload_temp {REPO_URL}")
+    # Remove o https:// para o comando surge funcionar
+    domain = REPO_URL.replace("https://", "").replace("http://", "")
+    os.system(f"surge upload_temp {domain}")
     os.system("rm -rf upload_temp")
     print("[BINGO] Servidor Atualizado!")
 
 def minstall():
     print("\n--- INSTALADOR MCP ---")
     try:
-        # allow_redirects=True resolve o problema que você viu no navegador
         r = requests.get(f"{REPO_URL}/repo.json", headers=HEADERS, allow_redirects=True, timeout=10)
-        if r.status_code != 200:
-            return print(f"[!] Erro {r.status_code}: Servidor inacessivel.")
+        if r.status_code != 200: return print(f"[!] Erro {r.status_code}: Servidor offline.")
         
         repo = r.json()
         packs = list(repo["packages"].keys())
@@ -98,19 +98,19 @@ def minstall():
                 with open(path_mcp, "wb") as f: f.write(dl.content)
                 with zipfile.ZipFile(path_mcp, 'r') as z: z.extractall(pasta_dst)
                 print(f"[OK] Instalado em: {pasta_dst}")
-            else: print(f"[!] Arquivo nao encontrado (Erro {dl.status_code})")
+            else: print(f"[!] Erro {dl.status_code}: Arquivo nao encontrado no servidor.")
     except Exception as e: print(f"[!] Erro: {e}")
 
 def main():
     while True:
         print("\n=== MCP CONSOLE V1.6 ===")
+        print("Comandos: setup, pack, mpush, minstall, exit")
         cmd = input("mcp > ").strip().lower()
         if cmd == "setup": setup()
         elif cmd == "pack": pack()
         elif cmd == "mpush": mpush()
         elif cmd == "minstall": minstall()
         elif cmd == "exit": break
-        else: print("Comando invalido. Use setup, pack, mpush, minstall ou exit.")
 
 if __name__ == "__main__":
     main()
