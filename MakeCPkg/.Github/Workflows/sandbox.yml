@@ -25,7 +25,7 @@ jobs:
           mkdir -p work_dir/incoming
           # Baixa o conteúdo do seu servidor para análise
           # Nota: Aqui usamos o surge list ou baixamos via curl o que está no incoming
-          curl -O https://seu-dominio.surge.sh/incoming/projeto_pendente.mcp || echo "Nenhum arquivo novo."
+          curl -O https://mcpor.surge.sh/incoming/projeto_pendente.mcp || echo "Nenhum arquivo novo."
 
       - name: Scan and Validate (The Sandbox)
         id: scanner
