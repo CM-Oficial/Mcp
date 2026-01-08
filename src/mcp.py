@@ -6,25 +6,25 @@ import zipfile
 import hashlib
 import time
 
-# --- AUTO-INSTALADOR DA LIB REQUESTS ---
+# --- AUTO-INSTALADOR DE DEPENDÊNCIAS ---
 try:
     import requests
 except ImportError:
-    print("Instalando dependencias necessarias...")
+    print("Instalando dependencias (requests)...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "--quiet"])
     import requests
 
-# URL do seu servidor Surge
+# Configurações do Servidor
 REPO_URL = "https://mcpor.surge.sh"
 
 def gerar_mid(nome):
     return hashlib.md5(f"{nome}{time.time()}".encode()).hexdigest()[:8].upper()
 
 def help_menu():
-    print("\n--- MCP MANAGER (CONSOLE) ---")
+    print("\n--- MCP MANAGER PRO V1.5 ---")
     print("setup    : Criar nova pasta de projeto")
     print("pack     : Gerar pacote .mcp dos projetos locais")
-    print("mpush    : Enviar o pacote .mcp para o servidor")
+    print("mpush    : Automatizar upload e atualizar catalogo no Surge")
     print("minstall : Baixar e instalar ferramenta do servidor")
     print("help     : Mostrar esta lista de comandos")
     print("exit     : Fechar o console")
@@ -45,16 +45,12 @@ def setup():
     with open(os.path.join(pasta, "mcp_manifest.json"), "w") as f:
         json.dump(manifesto, f, indent=4)
     
-    print(f"\n[OK] Pasta {pasta} criada com sucesso.")
-    print(f"Coloque seus arquivos dentro dela antes de dar 'pack'.")
+    print(f"\n[OK] Pasta {pasta} criada com sucesso!")
 
 def pack():
-    # Procura por pastas que começam com o padrão RI_BIN_N_
     pastas = [d for d in os.listdir('.') if os.path.isdir(d) and d.startswith("RI_BIN_N_")]
-    
     if not pastas:
-        print("\n[!] Erro: Nenhuma pasta de projeto (RI_BIN_N_...) encontrada.")
-        return
+        return print("\n[!] Erro: Nenhuma pasta RI_BIN_N_ encontrada.")
 
     for p in pastas:
         try:
@@ -62,119 +58,128 @@ def pack():
                 dados = json.load(f)
                 nome_zip = dados['name']
             
-            # Cria o arquivo .mcp (que é um zip)
             arquivo_mcp = f"{nome_zip}.mcp"
             with zipfile.ZipFile(arquivo_mcp, 'w', zipfile.ZIP_DEFLATED) as z:
-                for raiz, dirs, arquivos in os.walk(p):
+                for raiz, _, arquivos in os.walk(p):
                     for arq in arquivos:
-                        caminho_completo = os.path.join(raiz, arq)
-                        caminho_relativo = os.path.relpath(caminho_completo, '.')
-                        z.write(caminho_completo, caminho_relativo)
-            
+                        caminho_f = os.path.join(raiz, arq)
+                        z.write(caminho_f, os.path.relpath(caminho_f, '.'))
             print(f"[OK] Pacote gerado: {arquivo_mcp}")
         except Exception as e:
             print(f"[!] Erro ao empacotar {p}: {e}")
 
 def mpush():
-    # Busca arquivos .mcp na pasta atual
     arqs = [f for f in os.listdir('.') if f.endswith('.mcp')]
-    
     if not arqs:
-        print("\n[!] Erro: Nenhum arquivo .mcp encontrado. Rode o 'pack' primeiro.")
-        return
+        return print("\n[!] Erro: Nenhum arquivo .mcp encontrado. Use 'pack' primeiro.")
     
-    arquivo = arqs[0] # Pega o primeiro que encontrar
-    print(f"\n[+] Preparando upload de: {arquivo}")
+    arquivo_nome = arqs[0]
+    nome_ferramenta = arquivo_nome.replace(".mcp", "")
+    
+    print(f"\n[+] Iniciando sincronizacao de '{nome_ferramenta}'...")
 
-    # RESOLUÇÃO DO ERRO ENOTDIR: O Surge precisa subir uma pasta
-    os.makedirs("upload_temp", exist_ok=True)
-    os.system(f"cp {arquivo} upload_temp/")
+    # 1. Tenta baixar o repo.json atual do servidor
+    repo_data = {"packages": {}}
+    try:
+        r = requests.get(f"{REPO_URL}/repo.json", timeout=5)
+        if r.status_code == 200:
+            repo_data = r.json()
+    except:
+        print("[!] Aviso: Nao foi possivel ler o servidor. Criando novo catalogo.")
 
-    print(f"[+] Enviando para {REPO_URL}...")
-    # O comando abaixo envia o conteudo de upload_temp para a raiz do seu surge
-    # Se quiser que vá para uma pasta /incoming, o REPO_URL deve ter isso ou mudar aqui
+    # 2. Localiza o MID da pasta local
+    mid_local = ""
+    for d in os.listdir('.'):
+        if os.path.isdir(d) and d.startswith("RI_BIN_N_"):
+            m_path = os.path.join(d, "mcp_manifest.json")
+            if os.path.exists(m_path):
+                with open(m_path, "r") as f:
+                    if json.load(f)['name'] == nome_ferramenta:
+                        mid_local = d
+                        break
+    
+    if not mid_local:
+        return print("[!] Erro: Nao encontrei a pasta RI_BIN_N correspondente.")
+
+    # 3. Atualiza o dicionário do catálogo
+    repo_data["packages"][nome_ferramenta] = {
+        "folder": mid_local,
+        "date": time.strftime("%Y-%m-%d")
+    }
+
+    # 4. Prepara a pasta temporária de upload (Protege seus .py fonte)
+    os.makedirs("upload_temp/RI_bin", exist_ok=True)
+    caminho_destino_mcp = os.path.join("upload_temp/RI_bin", mid_local)
+    os.makedirs(caminho_destino_mcp, exist_ok=True)
+    
+    # Copia apenas o necessário
+    os.system(f"cp {arquivo_nome} {caminho_destino_mcp}/")
+    with open("upload_temp/repo.json", "w") as f:
+        json.dump(repo_data, f, indent=4)
+
+    # 5. Sobe para o Surge
+    print(f"[+] Enviando para o Surge...")
     os.system(f"surge upload_temp {REPO_URL}")
-
-    # Limpa a pasta temporaria
+    
+    # 6. Limpa o lixo local
     os.system("rm -rf upload_temp")
-    print("\n[BINGO] Upload concluido.")
+    print(f"\n[BINGO] '{nome_ferramenta}' esta online e catalogada!")
 
 def minstall():
     print("\n--- INSTALADOR MCP ---")
-    nome = input("Digite o nome da ferramenta: ").strip()
-    
     try:
-        # Busca o catalogo no servidor
         r = requests.get(f"{REPO_URL}/repo.json")
         if r.status_code != 200:
-            print("[!] Erro: Nao foi possivel acessar o arquivo repo.json no servidor.")
-            return
-            
-        repo = r.json()
+            return print("[!] Erro: O servidor esta vazio ou offline.")
         
+        repo = r.json()
+        packs = list(repo["packages"].keys())
+        print(f"Disponiveis: {', '.join(packs)}")
+        
+        nome = input("Ferramenta para baixar: ").strip()
         if nome in repo["packages"]:
             info = repo["packages"][nome]
             mid = info["folder"]
-            # Tenta baixar o arquivo .mcp da estrutura de pastas do servidor
+            # URL corrigida para a estrutura RI_bin
             url_dl = f"{REPO_URL}/RI_bin/{mid}/{nome}.mcp"
             
-            print(f"[+] Baixando {nome} de {url_dl}...")
+            print(f"[+] Baixando de: {url_dl}")
             dl = requests.get(url_dl)
             
             if dl.status_code == 200:
-                pasta_destino = os.path.expanduser(f"~/RI_BIN/{mid}")
-                os.makedirs(pasta_destino, exist_ok=True)
+                pasta_dst = os.path.expanduser(f"~/RI_BIN/{mid}")
+                os.makedirs(pasta_dst, exist_ok=True)
+                path_mcp = os.path.join(pasta_dst, f"{nome}.mcp")
                 
-                caminho_mcp = os.path.join(pasta_destino, f"{nome}.mcp")
-                with open(caminho_mcp, "wb") as f:
+                with open(path_mcp, "wb") as f:
                     f.write(dl.content)
-                
-                # Extrai os arquivos
-                with zipfile.ZipFile(caminho_mcp, 'r') as z:
-                    z.extractall(pasta_destino)
-                
-                print(f"[OK] Ferramenta instalada em: {pasta_destino}")
+                with zipfile.ZipFile(path_mcp, 'r') as z:
+                    z.extractall(pasta_dst)
+                print(f"[OK] Instalado com sucesso em: {pasta_dst}")
             else:
-                print(f"[!] Erro: O arquivo {nome}.mcp nao foi encontrado no servidor.")
+                print(f"[!] Erro {dl.status_code}: Arquivo nao encontrado no servidor.")
         else:
-            print(f"[!] Erro: A ferramenta '{nome}' nao esta registrada no repo.json.")
-            
+            print("[!] Nome nao consta no catalogo.")
     except Exception as e:
-        print(f"[!] Erro de conexao ou processamento: {e}")
+        print(f"[!] Erro tecnico: {e}")
 
-# --- LOOP DO CONSOLE INTERATIVO ---
 def main():
-    print("\n===============================")
-    print("    MCP SYSTEM CONSOLE V1.0    ")
-    print("===============================")
-    help_menu()
-    
     while True:
+        print("\n===============================")
+        print("    MCP SYSTEM CONSOLE V1.5    ")
+        print("===============================")
+        help_menu()
         try:
-            # Prompt de comando seco, sem barras
             cmd = input("\nmcp > ").strip().lower()
-            
-            if not cmd:
-                continue
-            elif cmd == "setup":
-                setup()
-            elif cmd == "pack":
-                pack()
-            elif cmd == "mpush":
-                mpush()
-            elif cmd == "minstall":
-                minstall()
-            elif cmd == "help":
-                help_menu()
-            elif cmd == "exit" or cmd == "quit":
-                print("Encerrando console...")
-                break
-            else:
-                print(f"Comando '{cmd}' desconhecido. Digite 'help' para ver as opcoes.")
-        except KeyboardInterrupt:
-            print("\nUse 'exit' para fechar o programa.")
-        except Exception as e:
-            print(f"\n[!] Ocorreu um erro inesperado: {e}")
+            if cmd == "setup": setup()
+            elif cmd == "pack": pack()
+            elif cmd == "mpush": mpush()
+            elif cmd == "minstall": minstall()
+            elif cmd == "help": help_menu()
+            elif cmd == "exit": 
+                print("Encerrando..."); break
+            else: print(f"Comando '{cmd}' desconhecido.")
+        except Exception as e: print(f"Erro: {e}")
 
 if __name__ == "__main__":
     main()
