@@ -1,0 +1,67 @@
+name: MCP Sandbox Judge
+
+on:
+  workflow_dispatch: # Permite rodar manualmente
+  schedule:
+    - cron: '*/30 * * * *' # Roda a cada 30 minutos para checar se há novos pacotes
+
+jobs:
+  judge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js (Para o Surge)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install Surge
+        run: npm install -g surge
+
+      - name: Download Incoming Packages
+        run: |
+          mkdir -p work_dir/incoming
+          # Baixa o conteúdo do seu servidor para análise
+          # Nota: Aqui usamos o surge list ou baixamos via curl o que está no incoming
+          curl -O https://seu-dominio.surge.sh/incoming/projeto_pendente.mcp || echo "Nenhum arquivo novo."
+
+      - name: Scan and Validate (The Sandbox)
+        id: scanner
+        run: |
+          # 1. Descompactar
+          unzip *.mcp -d work_dir/extracted
+          
+          # 2. LISTA NEGRA DE COMANDOS (O SEU FILTRO)
+          # Adicione aqui o que você quer proibir
+          BANNED_CMDS=("rm -rf" "termux-setup-storage" "mkfs" ":(){:|:&};:" "killall" "rm /")
+          
+          # 3. Varredura
+          FOUND_MALWARE=false
+          for cmd in "${BANNED_CMDS[@]}"; do
+            if grep -rq "$cmd" work_dir/extracted; then
+              echo "!!! PERIGO DETECTADO: Comando '$cmd' encontrado !!!"
+              FOUND_MALWARE=true
+              break
+            fi
+          done
+          
+          echo "malware=$FOUND_MALWARE" >> $GITHUB_OUTPUT
+
+      - name: Decision: BAN (If Malware)
+        if: steps.scanner.outputs.malware == 'true'
+        run: |
+          echo "Executando protocolo de BAN..."
+          # Aqui o script edita o seu blacklist.json local e sobe para o Surge
+          # Você precisará configurar o SURGE_TOKEN nos Secrets do GitHub
+          # surge --token ${{ secrets.SURGE_TOKEN }} ...
+
+      - name: Decision: BINGO (If Clean)
+        if: steps.scanner.outputs.malware == 'false'
+        run: |
+          echo "BINGO! Pacote aprovado."
+          # 1. Move para a pasta definitiva (RI_bin)
+          # 2. Atualiza o repo.json
+          # 3. Limpa a pasta incoming
+          # 4. Faz o Deploy final
